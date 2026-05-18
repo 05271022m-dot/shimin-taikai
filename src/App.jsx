@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { doc, onSnapshot, setDoc, updateDoc, arrayUnion } from "firebase/firestore";
+import { doc, onSnapshot, setDoc, updateDoc, arrayUnion, deleteField } from "firebase/firestore";
 import { db } from "./firebase.js";
 
 // ─── Firestore Document ───────────────────────────────────────────────────────
@@ -11,6 +11,7 @@ const DEFAULT_STATE = {
   announcements: [],
   question: null,
   answers: {},
+  opinions: {},
 };
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -22,7 +23,7 @@ const OFFICERS = [
   { id: "vice2", name: "佐々木夏穂副市長", title: "副市長", label: "🤝 佐々木夏穂　副市長",  hasPassword: false },
 ];
 
-const GROUP_NAMES = Array.from({ length: 10 }, (_, i) => `第${i + 1}班`);
+const GROUP_NAMES = Array.from({ length: 17 }, (_, i) => `第${i + 1}班`);
 const KU_LIST = ["3年AC区", "3年B区", "2年A区", "2年B区", "1年A区", "1年B区"];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -32,8 +33,9 @@ const fmtSec = (s) => {
   const n = Math.abs(Math.floor(s || 0));
   return `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
 };
+const makeUserId = (ku, number) => `${ku}-${number}`;
 
-// ─── Session Hook (Real-time Firebase) ────────────────────────────────────────
+// ─── Session Hook ─────────────────────────────────────────────────────────────
 function useSession() {
   const [data, setData]       = useState(DEFAULT_STATE);
   const [loading, setLoading] = useState(true);
@@ -64,10 +66,23 @@ function useSession() {
 const updateSession    = (changes)        => updateDoc(SESSION_DOC, changes);
 const setSessionStart  = (started)        => updateSession({ started });
 const addAnnouncement  = (a)              => updateSession({ announcements: arrayUnion(a) });
-const setQuestion      = (q)              => updateSession({ question: q, answers: {} });
+const setQuestion      = (q)              => updateSession({ question: q, answers: {}, opinions: {} });
 const setGroupAnswer   = (g, a)           => updateSession({ [`answers.${g}`]: a });
 const setTimerState    = (t)              => updateSession({ timer: t });
 const resetSession     = ()               => setDoc(SESSION_DOC, DEFAULT_STATE);
+
+// Opinion mutations
+const addOpinion       = (g, op)          => updateSession({ [`opinions.${g}.${op.id}`]: op });
+const removeOpinion    = (g, opId)        => updateSession({ [`opinions.${g}.${opId}`]: deleteField() });
+
+const toggleReaction = async (currentOpinions, g, opId, field, userId) => {
+  const op = currentOpinions?.[g]?.[opId];
+  if (!op) return;
+  const list = op[field] || [];
+  const has = list.includes(userId);
+  const newList = has ? list.filter(u => u !== userId) : [...list, userId];
+  await updateSession({ [`opinions.${g}.${opId}.${field}`]: newList });
+};
 
 // Timer controls
 const timerSet   = (target)        => setTimerState({ running: false, startedAt: null, acc: 0, target });
@@ -75,7 +90,7 @@ const timerStart = (acc, target)   => setTimerState({ running: true,  startedAt:
 const timerStop  = (acc, target)   => setTimerState({ running: false, startedAt: null, acc, target });
 const timerReset = (target)        => setTimerState({ running: false, startedAt: null, acc: 0, target });
 
-// ─── Countdown Hook ───────────────────────────────────────────────────────────
+// ─── Countdown ────────────────────────────────────────────────────────────────
 function useCountdown(timer) {
   const [rem, setRem] = useState(0);
   useEffect(() => {
@@ -118,7 +133,6 @@ function QRModal({ onClose }) {
   const [copied, setCopied]   = useState(false);
   const qrBox = useRef(null);
 
-  // Load QR library
   useEffect(() => {
     if (window.QRCode) { setLibReady(true); return; }
     const s = document.createElement("script");
@@ -128,7 +142,6 @@ function QRModal({ onClose }) {
     document.head.appendChild(s);
   }, []);
 
-  // Generate QR
   useEffect(() => {
     if (!libReady || !url.trim() || !qrBox.current) return;
     qrBox.current.innerHTML = "";
@@ -191,7 +204,6 @@ export default function App() {
       <div className="text-center"><div className="text-4xl mb-3 animate-pulse">🌆</div><div className="text-sm">接続中...</div></div>
     </div>;
   }
-
   if (error) {
     return <div className="min-h-screen flex items-center justify-center bg-slate-950 p-6">
       <div className="max-w-sm text-center">
@@ -221,7 +233,7 @@ export default function App() {
 function QRBtn({ onQR }) {
   return (
     <button onClick={onQR} title="QRコードで共有"
-      className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-700 hover:border-slate-400 text-slate-500 hover:text-slate-200 transition-all">
+      className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-700 hover:border-slate-400 text-slate-500 hover:text-slate-200">
       ⬛
     </button>
   );
@@ -264,7 +276,7 @@ function Home({ onCitizen, onOfficer, onTeacher, onQR }) {
           <button onClick={onTeacher} className="w-full py-5 rounded-2xl font-bold text-lg active:scale-95 border border-emerald-500/40"
             style={{ background: "linear-gradient(135deg,#065f46,#059669)", boxShadow: "0 8px 32px rgba(5,150,105,0.3)" }}>📋 教師として参加</button>
         </div>
-        <button onClick={onQR} className="mt-7 flex items-center gap-2 mx-auto px-5 py-2.5 rounded-xl border border-slate-700 hover:border-blue-600/60 text-slate-400 hover:text-blue-300 transition-all text-sm">
+        <button onClick={onQR} className="mt-7 flex items-center gap-2 mx-auto px-5 py-2.5 rounded-xl border border-slate-700 hover:border-blue-600/60 text-slate-400 hover:text-blue-300 text-sm">
           ⬛ QRコードで参加者を招待
         </button>
       </div>
@@ -307,11 +319,11 @@ function CitizenGroup({ onBack, onEnter }) {
   return (
     <div className="min-h-screen p-6 flex flex-col bg-slate-950">
       <button onClick={onBack} className="text-blue-400 mb-4 text-sm self-start">← 戻る</button>
-      <div className="mb-5"><div className="text-xs text-blue-500 tracking-widest mb-1">GROUP SELECT</div><h2 className="text-2xl font-bold">班を選択</h2><p className="text-slate-500 text-sm mt-1">事前に振り分けられた班を選んでください</p></div>
-      <div className="grid grid-cols-2 gap-2 mb-5">
+      <div className="mb-5"><div className="text-xs text-blue-500 tracking-widest mb-1">GROUP SELECT</div><h2 className="text-2xl font-bold">班を選択（全{GROUP_NAMES.length}班）</h2><p className="text-slate-500 text-sm mt-1">事前に振り分けられた班を選んでください</p></div>
+      <div className="grid grid-cols-3 gap-2 mb-5">
         {GROUP_NAMES.map((g, i) => (
           <button key={g} onClick={() => setSel(i)}
-            className={`py-4 rounded-xl font-bold text-base active:scale-95 border ${sel === i ? "border-blue-500" : "border-slate-800 text-slate-400 bg-slate-900"}`}
+            className={`py-3 rounded-xl font-bold text-sm active:scale-95 border ${sel === i ? "border-blue-500" : "border-slate-800 text-slate-400 bg-slate-900"}`}
             style={sel === i ? { background: "linear-gradient(135deg,#1e3a8a,#1d4ed8)", boxShadow: "0 4px 20px rgba(29,78,216,0.4)" } : {}}>
             {g}
           </button>
@@ -334,26 +346,101 @@ function CitizenGroup({ onBack, onEnter }) {
   );
 }
 
+// ─── Opinion Card (Citizen view, interactive) ─────────────────────────────────
+function OpinionCard({ opinion, currentUserId, onToggleLike, onToggleQuestion, onDelete }) {
+  const isOwn = opinion.userId === currentUserId;
+  const liked = opinion.likes?.includes(currentUserId);
+  const questioned = opinion.questions?.includes(currentUserId);
+  const likeCount = opinion.likes?.length || 0;
+  const qCount = opinion.questions?.length || 0;
+
+  return (
+    <div className={`rounded-xl p-3 border ${isOwn ? "bg-blue-950/30 border-blue-800/40" : "bg-slate-900 border-slate-800"}`}>
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="text-xs flex items-center gap-2 flex-wrap">
+          <span className={isOwn ? "text-amber-300 font-bold" : "text-blue-400 font-medium"}>{opinion.userName}</span>
+          {isOwn && <span className="text-amber-500 text-[10px] bg-amber-950/50 px-1.5 py-0.5 rounded">あなた</span>}
+          <span className="text-slate-500">{opinion.time}</span>
+        </div>
+        {isOwn && (
+          <button onClick={onDelete} className="text-slate-600 hover:text-red-500 text-xs px-2 py-0.5 rounded">削除</button>
+        )}
+      </div>
+      <p className="text-white text-sm whitespace-pre-wrap leading-relaxed mb-2">{opinion.text}</p>
+      <div className="flex gap-2">
+        <button onClick={onToggleLike}
+          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all active:scale-95 ${
+            liked
+              ? "bg-blue-900 border-blue-500 text-blue-200"
+              : "bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500"
+          }`}>
+          👍 イイネ{likeCount > 0 && <span className="ml-1">{likeCount}</span>}
+        </button>
+        <button onClick={onToggleQuestion}
+          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all active:scale-95 ${
+            questioned
+              ? "bg-purple-900 border-purple-500 text-purple-200"
+              : "bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500"
+          }`}>
+          ❓ 質問！{qCount > 0 && <span className="ml-1">{qCount}</span>}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Citizen Room ─────────────────────────────────────────────────────────────
 function CitizenRoom({ user, session, onLogout, onQR }) {
   const cd = useCountdown(session.timer);
-  const { announcements, question, answers, started } = session;
+  const { announcements, question, answers, opinions, started } = session;
   const [answerText, setAnswerText] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [opinionText, setOpinionText] = useState("");
+  const [savingAnswer, setSavingAnswer] = useState(false);
+  const [savingOpinion, setSavingOpinion] = useState(false);
+
   const gk = String(user.group);
   const groupAnswer = answers?.[gk];
+  const groupOpinions = opinions?.[gk] || {};
+  const opinionsList = Object.values(groupOpinions).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  const userId = makeUserId(user.ku, user.number);
 
-  useEffect(() => { setAnswerText(""); }, [question?.id]);
+  useEffect(() => { setAnswerText(""); setOpinionText(""); }, [question?.id]);
 
-  const submit = async () => {
+  const submitAnswer = async () => {
     if (!answerText.trim() || !question) return;
-    setSaving(true);
+    setSavingAnswer(true);
     try {
       await setGroupAnswer(gk, {
-        text: answerText.trim(), leaderName: user.name, time: nowTime(), questionId: question.id
+        text: answerText.trim(),
+        leaderName: user.name,
+        time: nowTime(),
+        questionId: question.id
       });
     } catch (e) { console.error(e); }
-    setSaving(false);
+    setSavingAnswer(false);
+  };
+
+  const submitOpinion = async () => {
+    if (!opinionText.trim() || !question) return;
+    setSavingOpinion(true);
+    try {
+      const opId = uid();
+      await addOpinion(gk, {
+        id: opId,
+        userId,
+        userName: user.name,
+        userKu: user.ku,
+        userNumber: user.number,
+        text: opinionText.trim(),
+        time: nowTime(),
+        ts: Date.now(),
+        questionId: question.id,
+        likes: [],
+        questions: []
+      });
+      setOpinionText("");
+    } catch (e) { console.error(e); }
+    setSavingOpinion(false);
   };
 
   return (
@@ -400,28 +487,83 @@ function CitizenRoom({ user, session, onLogout, onQR }) {
               ))}
             </div>
           )}
+
           {question ? (
             <div className="rounded-xl p-4 border border-blue-700/30" style={{ background: "rgba(30,58,138,0.2)" }}>
               <div className="flex items-center gap-2 mb-3"><span className="text-blue-400 text-xs font-semibold">❓ 議題</span><span className="text-slate-500 text-xs">{question.time}</span></div>
               <p className="text-white font-semibold text-lg mb-4 leading-snug">{question.text}</p>
-              {groupAnswer && groupAnswer.questionId === question.id && (
-                <div className="bg-slate-900 border border-emerald-800/40 rounded-lg p-3 mb-3">
-                  <div className="text-emerald-400 text-xs font-medium mb-1">✅ 班の回答 — {groupAnswer.leaderName} · {groupAnswer.time}</div>
-                  <p className="text-white text-sm whitespace-pre-wrap">{groupAnswer.text}</p>
+
+              {/* === Group Opinions Section === */}
+              <div className="pt-4 border-t border-slate-700/50">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-blue-300 text-sm font-semibold">💭 班の意見を共有</span>
+                  <span className="text-slate-500 text-xs">{opinionsList.length} 件</span>
                 </div>
-              )}
-              {user.isLeader ? (
-                <div>
-                  <label className="text-slate-500 text-xs mb-2 block">班の意見をまとめて入力（リーダーのみ）</label>
-                  <textarea value={answerText} onChange={(e) => setAnswerText(e.target.value)} placeholder="班全体の意見をまとめて記入..." rows={4}
-                    className="w-full bg-slate-900 border border-slate-700 focus:border-blue-500 rounded-xl p-3 text-white placeholder-slate-600 text-sm resize-none outline-none" />
-                  <button onClick={submit} disabled={!answerText.trim() || saving}
-                    className="mt-2 w-full py-3 rounded-xl font-bold active:scale-95 disabled:opacity-30"
+
+                {/* Opinion input */}
+                <div className="mb-4 bg-slate-900/60 border border-slate-700 rounded-xl p-2">
+                  <textarea
+                    value={opinionText}
+                    onChange={(e) => setOpinionText(e.target.value)}
+                    placeholder={`${user.name}としての意見を書く...`}
+                    rows={2}
+                    className="w-full bg-transparent text-white placeholder-slate-600 text-sm resize-none outline-none p-1" />
+                  <button onClick={submitOpinion} disabled={!opinionText.trim() || savingOpinion}
+                    className="mt-1 w-full py-2 rounded-lg font-semibold text-sm active:scale-95 disabled:opacity-30"
                     style={{ background: "linear-gradient(135deg,#1e3a8a,#1d4ed8)" }}>
-                    {saving ? "送信中..." : groupAnswer ? "回答を更新する" : "回答を送信する"}
+                    {savingOpinion ? "投稿中..." : "📝 意見を投稿"}
                   </button>
                 </div>
-              ) : !groupAnswer && (<div className="text-center py-4 text-slate-500 text-sm">⏳ リーダーの回答を待っています</div>)}
+
+                {/* Opinions list */}
+                {opinionsList.length === 0 ? (
+                  <div className="text-center py-6 text-slate-600 text-sm">まだ誰も意見を出していません<br />最初の一人になろう！</div>
+                ) : (
+                  <div className="space-y-2">
+                    {opinionsList.map((op) => (
+                      <OpinionCard
+                        key={op.id}
+                        opinion={op}
+                        currentUserId={userId}
+                        onToggleLike={() => toggleReaction(opinions, gk, op.id, "likes", userId)}
+                        onToggleQuestion={() => toggleReaction(opinions, gk, op.id, "questions", userId)}
+                        onDelete={() => removeOpinion(gk, op.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* === Leader Summary Section === */}
+              {user.isLeader && (
+                <div className="pt-4 mt-4 border-t border-amber-700/30">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-amber-300 text-sm font-semibold">👑 班の代表意見（リーダーのみ）</span>
+                  </div>
+                  <p className="text-slate-500 text-xs mb-3 leading-relaxed">
+                    上の意見を参考に、班の代表として一つにまとめて提出してください
+                  </p>
+
+                  {groupAnswer && groupAnswer.questionId === question.id && (
+                    <div className="bg-slate-900 border border-emerald-800/40 rounded-lg p-3 mb-3">
+                      <div className="text-emerald-400 text-xs font-medium mb-1">✅ 提出済み · {groupAnswer.time}</div>
+                      <p className="text-white text-sm whitespace-pre-wrap">{groupAnswer.text}</p>
+                    </div>
+                  )}
+
+                  <textarea
+                    value={answerText}
+                    onChange={(e) => setAnswerText(e.target.value)}
+                    placeholder="班の意見をまとめた最終回答..."
+                    rows={4}
+                    className="w-full bg-slate-900 border border-slate-700 focus:border-amber-600 rounded-lg p-3 text-white placeholder-slate-600 text-sm resize-none outline-none" />
+                  <button onClick={submitAnswer} disabled={!answerText.trim() || savingAnswer}
+                    className="mt-2 w-full py-3 rounded-lg font-bold active:scale-95 disabled:opacity-30"
+                    style={{ background: "linear-gradient(135deg,#d97706,#f59e0b)", color: "#1e293b" }}>
+                    {savingAnswer ? "提出中..." : groupAnswer ? "班の代表意見を更新する" : "👑 班の代表意見として提出する"}
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-center py-20"><div className="text-5xl mb-4">🌆</div><p className="text-slate-500">三役からの議題を待っています</p></div>
@@ -483,10 +625,60 @@ function OfficerLogin({ onBack, onLogin }) {
   );
 }
 
+// ─── Group Detail Card (Officer / Teacher view with expansion) ────────────────
+function GroupDetailCard({ groupIdx, answer, opinionsMap }) {
+  const [expanded, setExpanded] = useState(false);
+  const opinionsList = Object.values(opinionsMap || {}).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  const hasOpinions = opinionsList.length > 0;
+
+  return (
+    <div className={`rounded-xl border ${answer ? "bg-slate-900 border-slate-700" : "bg-slate-950 border-slate-800/50"}`}>
+      <div className="p-3">
+        <div className="flex items-center justify-between mb-1">
+          <span className="font-bold text-sm">{GROUP_NAMES[groupIdx]}</span>
+          <span className={`text-xs font-medium ${answer ? "text-emerald-400" : "text-slate-600"}`}>{answer ? "✅ 提出済" : "⏳ 未提出"}</span>
+        </div>
+        {answer && (
+          <>
+            <p className="text-white text-sm whitespace-pre-wrap leading-relaxed">{answer.text}</p>
+            <p className="text-slate-500 text-xs mt-2">👑 {answer.leaderName} · {answer.time}</p>
+          </>
+        )}
+      </div>
+      {hasOpinions && (
+        <>
+          <button onClick={() => setExpanded(!expanded)}
+            className="w-full px-3 py-2 border-t border-slate-800 text-slate-500 text-xs flex items-center justify-between hover:text-slate-300 hover:bg-slate-900/50">
+            <span>💭 班員の意見 ({opinionsList.length} 件)</span>
+            <span>{expanded ? "▲" : "▼"}</span>
+          </button>
+          {expanded && (
+            <div className="px-3 pb-3 space-y-2">
+              {opinionsList.map((op) => (
+                <div key={op.id} className="bg-slate-800/70 rounded-lg p-2.5 mt-2 border border-slate-700/40">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-blue-400 text-xs font-medium">{op.userName}</span>
+                    <span className="text-slate-500 text-xs">{op.time}</span>
+                  </div>
+                  <p className="text-slate-200 text-sm whitespace-pre-wrap leading-relaxed mb-1.5">{op.text}</p>
+                  <div className="flex gap-3 text-xs">
+                    <span className="text-blue-300">👍 {op.likes?.length || 0}</span>
+                    <span className="text-purple-300">❓ {op.questions?.length || 0}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Officer Room ─────────────────────────────────────────────────────────────
 function OfficerRoom({ user, session, onLogout, onQR }) {
   const cd = useCountdown(session.timer);
-  const { announcements, question, answers, started } = session;
+  const { announcements, question, answers, opinions, started } = session;
   const [text, setText]   = useState("");
   const [mode, setMode]   = useState("announce");
   const [tab, setTab]     = useState("control");
@@ -495,6 +687,7 @@ function OfficerRoom({ user, session, onLogout, onQR }) {
 
   const isMayor       = user.id === "mayor";
   const answeredCount = Object.keys(answers || {}).length;
+  const totalGroups   = GROUP_NAMES.length;
 
   const handleTimer = async () => {
     if (cd.isRunning) await timerStop(cd.target - cd.rem, cd.target);
@@ -525,7 +718,7 @@ function OfficerRoom({ user, session, onLogout, onQR }) {
         {started ? "🟢 大会進行中" : "🔴 大会開始前"}
       </div>
       <div className="flex border-b border-slate-800">
-        {[["control","操作"],["answers",`回答 ${answeredCount}/10`]].map(([k,l]) => (
+        {[["control","操作"],["answers",`回答 ${answeredCount}/${totalGroups}`]].map(([k,l]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`flex-1 py-3 text-sm font-semibold ${tab === k ? "text-amber-400 border-b-2 border-amber-400" : "text-slate-500"}`}>{l}</button>
         ))}
@@ -575,7 +768,7 @@ function OfficerRoom({ user, session, onLogout, onQR }) {
                 ))}
               </div>
               <textarea value={text} onChange={(e) => setText(e.target.value)}
-                placeholder={mode === "announce" ? "全員へのアナウンスを入力..." : "議題を入力（送信で全班の回答がリセット）..."}
+                placeholder={mode === "announce" ? "全員へのアナウンスを入力..." : "議題を入力（送信で全班の回答・意見がリセット）..."}
                 rows={3} className="w-full bg-slate-900 border border-slate-700 focus:border-amber-600 rounded-xl p-3 text-white placeholder-slate-600 text-sm resize-none outline-none" />
               <button onClick={handleSend} disabled={!text.trim()}
                 className="mt-2 w-full py-3 rounded-xl font-bold active:scale-95 disabled:opacity-30"
@@ -601,21 +794,13 @@ function OfficerRoom({ user, session, onLogout, onQR }) {
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2 mb-2">
               <div className="bg-slate-900 rounded-xl p-3 text-center border border-emerald-900/30"><div className="text-2xl font-black text-emerald-400">{answeredCount}</div><div className="text-slate-500 text-xs">提出済み</div></div>
-              <div className="bg-slate-900 rounded-xl p-3 text-center border border-slate-800"><div className="text-2xl font-black text-slate-500">{10 - answeredCount}</div><div className="text-slate-500 text-xs">未提出</div></div>
+              <div className="bg-slate-900 rounded-xl p-3 text-center border border-slate-800"><div className="text-2xl font-black text-slate-500">{totalGroups - answeredCount}</div><div className="text-slate-500 text-xs">未提出</div></div>
             </div>
             {question && (<div className="rounded-xl p-3 border border-blue-700/30 mb-1" style={{ background: "rgba(30,58,138,0.15)" }}>
               <div className="text-blue-400 text-xs font-semibold mb-1">現在の議題</div><p className="text-white text-sm">{question.text}</p></div>)}
-            {GROUP_NAMES.map((g, i) => {
-              const ans = answers?.[String(i)];
-              return (
-                <div key={g} className={`rounded-xl p-3 border ${ans ? "bg-slate-900 border-slate-700" : "bg-slate-950 border-slate-800/50"}`}>
-                  <div className="flex items-center justify-between mb-1"><span className="font-bold text-sm">{g}</span>
-                    <span className={`text-xs font-medium ${ans ? "text-emerald-400" : "text-slate-600"}`}>{ans ? "✅ 提出済" : "⏳ 未提出"}</span></div>
-                  {ans && <><p className="text-white text-sm whitespace-pre-wrap leading-relaxed">{ans.text}</p>
-                    <p className="text-slate-500 text-xs mt-2">👑 {ans.leaderName} · {ans.time}</p></>}
-                </div>
-              );
-            })}
+            {GROUP_NAMES.map((g, i) => (
+              <GroupDetailCard key={g} groupIdx={i} answer={answers?.[String(i)]} opinionsMap={opinions?.[String(i)]} />
+            ))}
           </div>
         )}
       </div>
@@ -626,9 +811,10 @@ function OfficerRoom({ user, session, onLogout, onQR }) {
 // ─── Teacher Room ─────────────────────────────────────────────────────────────
 function TeacherRoom({ session, onLogout, onQR }) {
   const cd = useCountdown(session.timer);
-  const { announcements, question, answers, started } = session;
+  const { announcements, question, answers, opinions, started } = session;
   const [tab, setTab] = useState("answers");
   const answeredCount = Object.keys(answers || {}).length;
+  const totalGroups = GROUP_NAMES.length;
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950">
@@ -641,7 +827,7 @@ function TeacherRoom({ session, onLogout, onQR }) {
         {started ? "🟢 大会進行中" : "🔴 大会開始前"}
       </div>
       <div className="flex border-b border-slate-800">
-        {[["answers",`回答 ${answeredCount}/10`],["announce","連絡"]].map(([k,l]) => (
+        {[["answers",`回答 ${answeredCount}/${totalGroups}`],["announce","連絡"]].map(([k,l]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`flex-1 py-3 text-sm font-semibold ${tab === k ? "text-emerald-400 border-b-2 border-emerald-400" : "text-slate-500"}`}>{l}</button>
         ))}
@@ -652,7 +838,7 @@ function TeacherRoom({ session, onLogout, onQR }) {
             <div className="grid grid-cols-3 gap-2 mb-2">
               {[
                 { l: "提出済み", v: answeredCount, c: "text-emerald-400", b: "border-emerald-900/30" },
-                { l: "未提出", v: 10-answeredCount, c: "text-slate-500", b: "border-slate-800" },
+                { l: "未提出", v: totalGroups - answeredCount, c: "text-slate-500", b: "border-slate-800" },
                 { l: cd.isTimeUp ? "TIME UP" : cd.isRunning ? "計測中" : "停止中", v: cd.isTimeUp ? "🔔" : cd.isRunning ? "●" : "■", c: cd.isTimeUp ? "text-red-400" : cd.isRunning ? "text-emerald-400" : "text-slate-500", b: "border-slate-800" },
               ].map((s) => (
                 <div key={s.l} className={`bg-slate-900 rounded-xl p-3 text-center border ${s.b}`}>
@@ -662,17 +848,9 @@ function TeacherRoom({ session, onLogout, onQR }) {
             </div>
             {question && (<div className="rounded-xl p-3 border border-blue-700/30" style={{ background: "rgba(30,58,138,0.15)" }}>
               <div className="text-blue-400 text-xs font-semibold mb-1">現在の議題</div><p className="text-white">{question.text}</p></div>)}
-            {GROUP_NAMES.map((g, i) => {
-              const ans = answers?.[String(i)];
-              return (
-                <div key={g} className={`rounded-xl p-3 border ${ans ? "bg-slate-900 border-slate-700" : "bg-slate-950 border-slate-800/50"}`}>
-                  <div className="flex items-center justify-between mb-1"><span className="font-bold text-sm">{g}</span>
-                    <span className={`text-xs font-medium ${ans ? "text-emerald-400" : "text-slate-600"}`}>{ans ? "✅ 提出済" : "⏳ 未提出"}</span></div>
-                  {ans && <><p className="text-white text-sm whitespace-pre-wrap leading-relaxed">{ans.text}</p>
-                    <p className="text-slate-500 text-xs mt-2">👑 {ans.leaderName} · {ans.time}</p></>}
-                </div>
-              );
-            })}
+            {GROUP_NAMES.map((g, i) => (
+              <GroupDetailCard key={g} groupIdx={i} answer={answers?.[String(i)]} opinionsMap={opinions?.[String(i)]} />
+            ))}
           </div>
         )}
         {tab === "announce" && (
