@@ -339,7 +339,7 @@ function Home({ onCitizen, onChair, onOfficer, onTeacher, onQR }) {
       <div className="relative z-10 w-full max-w-xs text-center">
         <div className="mb-8">
           <div className="inline-block border border-blue-500/30 rounded-full px-4 py-1 mb-4">
-            <span className="text-blue-400 text-xs tracking-[0.2em]">能代第一中学校 生徒会</span>
+            <span className="text-blue-400 text-xs tracking-[0.2em]">能代第一中学校 学校都市</span>
           </div>
           <div className="text-7xl font-black tracking-tighter" style={{ textShadow: "0 0 60px rgba(99,147,255,0.3)" }}>2026</div>
           <div className="text-2xl font-bold tracking-widest mt-1"
