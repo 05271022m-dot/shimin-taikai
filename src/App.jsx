@@ -22,7 +22,7 @@ const MAYOR_PASSWORD = "sorasora";
 // 議長（新規）
 const CHAIRS = [
   { id: "chair1", name: "金谷真恋議長", title: "議長",   label: "👨‍⚖️ 金谷真恋　議長" },
-  { id: "chair2", name: "舛屋舜副議長", title: "副議長", label: "🤝 舛屋舜　副議長" },
+  { id: "chair2", name: "舛屋舜議長", title: "議長", label: "🤝 舛屋舜　議長" },
 ];
 
 // 三役
